@@ -11,7 +11,7 @@
 ### 1. 安装 Wind MCP Skill
 
 系统已配置 Wind MCP Skill 用于获取实时金融数据：
-- Wind MCP Skill 路径: `C:\Users\Administrator\.agents\skills\wind-mcp-skill`
+- Wind MCP Skill 路径：
 - API Key: 已配置在环境变量 `WIND_API_KEY`
 
 如需重新配置：
@@ -123,16 +123,7 @@ CONFIG = {
 > 检测到 4 条潜在信号：
 > - **加仓信号**：科创50ETF（588000），净流入 171.86亿，置信度：高
 ```
-
----
-
-## 下一步（可选）
-
-1. **定时任务**: Windows 用任务计划程序 / 每天自动运行
-2. **邮件推送**: 配合 SMTP 发送报告到邮箱
-3. **飞书通知**: 接入飞书机器人推送消息
-
-需要哪个跟我说，我来帮你加！
+仅作为学习使用 不作为投资意见 望周知
 
 ---
 
