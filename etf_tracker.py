@@ -8,7 +8,7 @@ ETF 国家队资金监测系统
 3. 连续5日资金流趋势检测→国家队加仓/减仓信号
 4. 自动构建ETF规模TOP20排名
 
-数据来源: Wind MCP Skill (优先) / akshare (备选)
+数据来源: Wind MCP Skill (优先) / akshare (备选) / 模拟数据 (演示)
 """
 
 import pandas as pd
@@ -16,16 +16,66 @@ from datetime import datetime, timedelta
 import json
 import os
 import subprocess
+import sys
+import random
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # ==================== 数据源抽象 ====================
-WIND_MCP_AVAILABLE = True
+WIND_MCP_AVAILABLE = False  # Wind MCP Skill 不可用
 WIND_MCP_PATH = os.path.join(os.path.expanduser("~"), ".agents", "skills", "wind-mcp-skill")
 
 try:
     import akshare as ak
     AK_AVAILABLE = True
+    print("✅ akshare 数据源已就绪")
 except ImportError:
     AK_AVAILABLE = False
+    print("❌ akshare 不可用，将使用模拟数据")
+
+# 模拟数据模式（当所有数据源不可用时使用）
+USE_MOCK_DATA = not AK_AVAILABLE
+
+
+def generate_mock_price(code):
+    """生成模拟价格"""
+    price_map = {
+        "510300": 3.85, "510310": 3.86, "159919": 3.84,
+        "510500": 6.20, "510510": 6.18, "510050": 2.65,
+        "510180": 6.85, "159915": 1.98, "159952": 1.97,
+        "588000": 1.85, "588080": 1.84, "560010": 1.52,
+        "512100": 1.53, "159647": 1.25, "515080": 1.45,
+        "515180": 1.46, "512890": 1.38, "512880": 1.28,
+        "512800": 1.15, "512170": 0.78, "512010": 0.82,
+        "512760": 1.35, "515030": 1.42, "518880": 8.95
+    }
+    base_price = price_map.get(code, 2.0)
+    change = random.uniform(-3, 3)
+    return base_price * (1 + change / 100), change
+
+
+def generate_mock_kline(code, days=5):
+    """生成模拟K线数据"""
+    kline = []
+    base_price = 2.0
+    for i in range(days):
+        date = (datetime.now() - timedelta(days=days - i - 1)).strftime("%Y-%m-%d")
+        change_pct = random.uniform(-2, 3)
+        base_price = base_price * (1 + change_pct / 100)
+        amount = random.uniform(50000000, 500000000)  # 500万 - 5亿
+        kline.append({
+            "date": date,
+            "close": round(base_price, 2),
+            "change_pct": round(change_pct, 2),
+            "volume": int(amount / base_price),
+            "amount": amount,
+            "net_flow": amount * (1 if change_pct >= 0 else -1)
+        })
+    return kline
 
 # ==================== 配置区 ====================
 CONFIG = {
