@@ -2,30 +2,27 @@
 
 追踪中央汇金等国家队 ETF 持仓变化，实时监测资金流向信号
 
-**数据来源**: Wind MCP Skill (优先) / akshare (备选)
+**数据来源**: akshare (新浪财经接口)
 
 ---
 
 ## 快速开始
 
-### 1. 安装 Wind MCP Skill
+### 1. 环境要求
 
-系统已配置 Wind MCP Skill 用于获取实时金融数据：
-- Wind MCP Skill 路径: `C:\Users\Administrator\.agents\skills\wind-mcp-skill`
-- API Key: 已配置在环境变量 `WIND_API_KEY`
+- Python 3.10+（akshare 需要）
+- 推荐使用虚拟环境
 
-如需重新配置：
-```bash
-# 检查 skill 状态
-npx skills list
-
-# 安装 wind-mcp-skill（如缺失）
-npx skills add Wind-Information-Co-Ltd/wind-skills --skill wind-mcp-skill -g -y
-```
-
-### 2. 安装 Python 依赖
+### 2. 创建虚拟环境并安装依赖
 
 ```bash
+# 创建 Python 3.14 虚拟环境
+py -3.14 -m venv python314_env
+
+# 激活虚拟环境（Windows）
+python314_env\Scripts\activate
+
+# 安装依赖
 pip install akshare pandas
 ```
 
@@ -34,6 +31,11 @@ pip install akshare pandas
 ```bash
 cd e:\各种PY程序\ETF追踪程序
 python etf_tracker.py
+```
+
+或者使用完整路径（确保使用正确的 Python 环境）：
+```bash
+& "e:\各种PY程序\python314_env\Scripts\python.exe" "e:\各种PY程序\ETF追踪程序\etf_tracker.py"
 ```
 
 ### 4. 查看报告
@@ -99,8 +101,9 @@ CONFIG = {
 
 ## 数据源优先级
 
-1. **Wind MCP** - 优先使用，数据更权威
-2. **akshare** - 备选数据源，当Wind不可用时自动降级
+1. **akshare** - 当前主要数据源，使用新浪财经接口获取实时行情
+2. **Wind MCP** - 备选数据源（需安装 Wind MCP Skill）
+3. **模拟数据** - 兜底方案，用于演示
 
 ---
 
@@ -123,16 +126,7 @@ CONFIG = {
 > 检测到 4 条潜在信号：
 > - **加仓信号**：科创50ETF（588000），净流入 171.86亿，置信度：高
 ```
-
----
-
-## 下一步（可选）
-
-1. **定时任务**: Windows 用任务计划程序 / 每天自动运行
-2. **邮件推送**: 配合 SMTP 发送报告到邮箱
-3. **飞书通知**: 接入飞书机器人推送消息
-
-需要哪个跟我说，我来帮你加！
+仅作为学习使用 不作为投资意见 望周知
 
 ---
 
