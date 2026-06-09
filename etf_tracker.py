@@ -26,7 +26,7 @@ except Exception:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # ==================== 数据源抽象 ====================
-WIND_MCP_AVAILABLE = False  # Wind MCP Skill 不可用
+WIND_MCP_AVAILABLE = True  # Wind MCP Skill 可用
 WIND_MCP_PATH = os.path.join(os.path.expanduser("~"), ".agents", "skills", "wind-mcp-skill")
 
 try:
@@ -130,52 +130,36 @@ def ensure_dirs():
 
 
 def _call_wind_mcp(server_type, tool_name, params):
-    """调用Wind MCP Skill"""
+    """调用Wind MCP Skill - 直接使用CLI"""
     try:
-        import json
-        temp_script = os.path.join(WIND_MCP_PATH, 'temp_call.js')
-        params_json = json.dumps(params)
+        import json as _json
+        params_json = _json.dumps(params, ensure_ascii=False)
+        # PowerShell 转义: JSON 中的双引号需要转义
+        escaped_json = params_json.replace('\\', '\\\\').replace('"', '\\"')
+        args = f'node scripts/cli.mjs call {server_type} {tool_name} \"{escaped_json}\"'
+        result = subprocess.run(
+            args, shell=True, cwd=WIND_MCP_PATH,
+            capture_output=True, text=True, encoding='utf-8', timeout=30
+        )
 
-        script_content = f"""
-const {{ spawnSync }} = require('child_process');
-const params = {params_json};
-const args = ['scripts/cli.mjs', 'call', '{server_type}', '{tool_name}', JSON.stringify(params)];
-const result = spawnSync('node', args, {{ encoding: 'utf-8' }});
-if (result.error) {{
-    console.log(JSON.stringify({{ok: false, error: {{code: 'SPAWN_ERROR', agent_action: result.error.message}}}}));
-    process.exit(1);
-}}
-if (result.status !== 0) {{
-    console.log(result.stdout || result.stderr);
-    process.exit(result.status);
-}}
-console.log(result.stdout);
-"""
-
-        with open(temp_script, 'w', encoding='utf-8') as f:
-            f.write(script_content)
-
-        result = subprocess.run(['node', 'temp_call.js'], shell=True, cwd=WIND_MCP_PATH,
-                               capture_output=True, text=True, encoding='utf-8')
-
-        if os.path.exists(temp_script):
-            os.remove(temp_script)
-
-        if result.returncode == 0:
-            output = json.loads(result.stdout)
-            if 'content' in output:
+        if result.returncode == 0 and result.stdout.strip():
+            output = _json.loads(result.stdout.strip())
+            if 'content' in output and len(output['content']) > 0:
                 text_content = output['content'][0]['text']
-                return json.loads(text_content)
+                return _json.loads(text_content)
             return output
         else:
             try:
-                error = json.loads(result.stdout)
-                print(f"Wind MCP 错误: {error.get('error', {}).get('agent_action', '未知错误')}")
-            except:
-                print(f"Wind MCP 调用失败: {result.stderr}")
+                error = _json.loads(result.stdout or '{}')
+                code = error.get('error', {}).get('code', 'UNKNOWN')
+                if code != 'NO_RESULTS':
+                    msg = error.get('error', {}).get('agent_action', str(error)[:100])
+                    print(f"  Wind MCP [{code}]: {msg[:120]}")
+            except Exception:
+                print(f"  Wind MCP 调用失败: {(result.stderr or '')[:100]}")
             return None
     except Exception as e:
-        print(f"Wind MCP 调用异常: {e}")
+        print(f"  Wind MCP 调用异常: {e}")
         return None
 
 
@@ -725,9 +709,27 @@ def generate_report() -> str:
     return report_file, report
 
 
+def archive_to_daily_reports(report_content: str) -> str:
+    """将报告归档至每日报告归档目录"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    archive_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "每日报告归档", today
+    )
+    os.makedirs(archive_dir, exist_ok=True)
+    report_date = datetime.now().strftime("%Y%m%d")
+    archive_file = os.path.join(archive_dir, f"ETF资金监测_{report_date}.md")
+    with open(archive_file, "w", encoding="utf-8") as f:
+        f.write(report_content)
+    print(f"  📁 已归档至: {archive_file}")
+    return archive_file
+
+
 def run_tracker():
     """运行追踪器"""
     report_file, report_content = generate_report()
+    # 自动归档至每日报告目录
+    archive_to_daily_reports(report_content)
     return report_file, report_content
 
 
