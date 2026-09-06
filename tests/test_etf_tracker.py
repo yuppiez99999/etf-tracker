@@ -186,9 +186,14 @@ def test_parse_args_rejects_bad_source():
 
 # ==================== 数据源探测 ====================
 
-def test_detect_wind_mcp_missing_path(monkeypatch):
-    monkeypatch.setattr(etf_tracker, "WIND_MCP_PATH", "/nonexistent/path")
-    assert etf_tracker._detect_wind_mcp() is False
+def test_detect_wind_available_no_key(monkeypatch):
+    monkeypatch.setattr(etf_tracker, "_get_wind_api_key", lambda: None)
+    assert etf_tracker._detect_wind_available() is False
+
+
+def test_detect_wind_available_with_key(monkeypatch):
+    monkeypatch.setattr(etf_tracker, "_get_wind_api_key", lambda: "fake-key")
+    assert etf_tracker._detect_wind_available() is True
 
 
 def test_source_enabled_logic():

@@ -14,7 +14,6 @@ ETF 国家队资金监测系统
 import argparse
 import os
 import random
-import subprocess
 import sys
 from datetime import datetime, timedelta
 
@@ -26,14 +25,41 @@ except Exception:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # ==================== 数据源探测 ====================
-WIND_MCP_PATH = os.path.join(os.path.expanduser("~"), ".agents", "skills", "wind-mcp-skill")
+WIND_FUND_ENDPOINT = "https://mcp.wind.com.cn/vserver_fund_data/mcp/"
+_WIND_API_KEY_CACHE: str | None = None
 
 
-def _detect_wind_mcp() -> bool:
-    """真实探测 Wind MCP Skill CLI 是否可用"""
-    if not os.path.isdir(WIND_MCP_PATH):
-        return False
-    return os.path.isfile(os.path.join(WIND_MCP_PATH, "scripts", "cli.mjs"))
+def _get_wind_api_key() -> str | None:
+    """Wind MCP API key: 环境变量 > ~/.wind-aifinmarket/config"""
+    global _WIND_API_KEY_CACHE
+    if _WIND_API_KEY_CACHE is not None:
+        return _WIND_API_KEY_CACHE
+    env_key = os.environ.get("WIND_API_KEY")
+    if env_key:
+        _WIND_API_KEY_CACHE = env_key.strip()
+        return _WIND_API_KEY_CACHE
+    cfg = os.path.join(os.path.expanduser("~"), ".wind-aifinmarket", "config")
+    try:
+        if os.path.isfile(cfg):
+            with open(cfg, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("export "):
+                        line = line[7:].strip()
+                    if line.startswith("WIND_API_KEY="):
+                        _WIND_API_KEY_CACHE = line.split("=", 1)[1].strip()
+                        return _WIND_API_KEY_CACHE
+    except Exception:
+        pass
+    _WIND_API_KEY_CACHE = None
+    return None
+
+
+def _detect_wind_available() -> bool:
+    """Wind MCP 可用性 = API key 已配置（HTTP 直连模式）"""
+    return _get_wind_api_key() is not None
 
 
 def _detect_akshare() -> bool:
@@ -45,7 +71,7 @@ def _detect_akshare() -> bool:
         return False
 
 
-WIND_MCP_AVAILABLE = _detect_wind_mcp()
+WIND_MCP_AVAILABLE = _detect_wind_available()
 AK_AVAILABLE = _detect_akshare()
 
 # 数据源模式: auto(按优先级降级) / wind(强制Wind MCP) / akshare(强制akshare) / mock(强制演示)
@@ -166,44 +192,115 @@ def ensure_dirs():
     os.makedirs(REPORT_DIR, exist_ok=True)
 
 
-def _call_wind_mcp(server_type, tool_name, params):
-    """调用Wind MCP Skill - 直接使用CLI"""
+def _wind_http_fund(tool_name: str, params: dict) -> dict | None:
+    """Wind MCP fund_data HTTP 直连 (urllib, 无新依赖)
+
+    返回解析后的 SSE JSON dict, 或 None。
+    """
+    api_key = _get_wind_api_key()
+    if not api_key:
+        return None
+    import json as _json
+    import urllib.request
+
+    payload = _json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": params},
+        }
+    ).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    try:
+        # 绕过系统代理 (国内 Wind 端点直连)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        req = urllib.request.Request(WIND_FUND_ENDPOINT, data=payload, headers=headers)
+        resp = opener.open(req, timeout=60)
+        text = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"  Wind HTTP 调用失败: {e}")
+        return None
+
+    if not text or not text.strip():
+        return None
+    # SSE 解析: 提取 "data: {json}" 行
+    for line in reversed(text.strip().split("\n")):
+        line = line.strip()
+        if line.startswith("data: "):
+            try:
+                return _json.loads(line[6:])
+            except Exception:
+                return None
+    try:
+        return _json.loads(text)
+    except Exception:
+        return None
+
+
+def _parse_fund_kline_rows(sse_data: dict) -> list[dict]:
+    """解析 Wind MCP fund_data K线响应 → [{date, close, volume, amount}, ...]
+
+    fund_data 字段: TIME / OPEN / MATCH(收盘) / HIGH / LOW / TURNOVER(成交额) / VOLUME(成交量)
+    """
+    if not isinstance(sse_data, dict):
+        return []
+    result = sse_data.get("result") or sse_data.get("data") or {}
+    content = result.get("content") if isinstance(result, dict) else None
+    if not content and isinstance(sse_data.get("result"), dict):
+        content = sse_data["result"].get("content")
+    if not content or not isinstance(content, list):
+        return []
+    text = content[0].get("text", "") if isinstance(content[0], dict) else str(content[0])
     try:
         import json as _json
 
-        params_json = _json.dumps(params, ensure_ascii=False)
-        # PowerShell 转义: JSON 中的双引号需要转义
-        escaped_json = params_json.replace("\\", "\\\\").replace('"', '\\"')
-        args = f'node scripts/cli.mjs call {server_type} {tool_name} "{escaped_json}"'
-        result = subprocess.run(
-            args,
-            shell=True,
-            cwd=WIND_MCP_PATH,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=30,
-        )
+        inner = _json.loads(text)
+    except Exception:
+        return []
+    data = inner.get("data", inner)
+    rows = data.get("rows", [])
+    if not rows:
+        return []
+    # 字段索引映射
+    columns = [c["name"].upper() for c in data.get("columns", [])]
+    idx = {name: i for i, name in enumerate(columns)}
+    parsed = []
+    for row in rows:
+        time_val = row[idx["TIME"]] if "TIME" in idx else ""
+        date_str = str(time_val)[:10]  # 2026-09-01T... → 2026-09-01
+        close = float(row[idx["MATCH"]]) if "MATCH" in idx and row[idx["MATCH"]] else 0
+        volume = float(row[idx["VOLUME"]]) if "VOLUME" in idx and row[idx["VOLUME"]] else 0
+        amount = float(row[idx["TURNOVER"]]) if "TURNOVER" in idx and row[idx["TURNOVER"]] else 0
+        parsed.append({"date": date_str, "close": close, "volume": volume, "amount": amount})
+    return parsed
 
-        if result.returncode == 0 and result.stdout.strip():
-            output = _json.loads(result.stdout.strip())
-            if "content" in output and len(output["content"]) > 0:
-                text_content = output["content"][0]["text"]
-                return _json.loads(text_content)
-            return output
-        else:
-            try:
-                error = _json.loads(result.stdout or "{}")
-                code = error.get("error", {}).get("code", "UNKNOWN")
-                if code != "NO_RESULTS":
-                    msg = error.get("error", {}).get("agent_action", str(error)[:100])
-                    print(f"  Wind MCP [{code}]: {msg[:120]}")
-            except Exception:
-                print(f"  Wind MCP 调用失败: {(result.stderr or '')[:100]}")
-            return None
-    except Exception as e:
-        print(f"  Wind MCP 调用异常: {e}")
+
+def _fetch_wind_fund_kline(windcode: str, days: int) -> list[dict] | None:
+    """通过 Wind MCP 获取 ETF K线 (前复权), 返回最近 days 个交易日"""
+    import datetime as dt
+
+    end_date = dt.datetime.now()
+    start_date = end_date - dt.timedelta(days=int(days * 1.5) + 10)
+    sse = _wind_http_fund(
+        "get_fund_kline",
+        {
+            "windcode": windcode,
+            "begin_date": start_date.strftime("%Y%m%d"),
+            "end_date": end_date.strftime("%Y%m%d"),
+            "price_type": 1,  # 前复权
+        },
+    )
+    if not sse:
         return None
+    rows = _parse_fund_kline_rows(sse)
+    if not rows:
+        return None
+    return rows[-days:] if len(rows) > days else rows
 
 
 # ==================== 数据获取层 ====================
@@ -214,24 +311,24 @@ def get_etf_basic_info(code: str, market: str) -> dict:
     if _source_enabled("wind") and WIND_MCP_AVAILABLE:
         try:
             wind_code = f"{code}.{market.upper()}"
-            result = _call_wind_mcp(
-                "fund_data",
-                "get_fund_price_indicators",
-                {"windcode": wind_code, "indexes": "中文简称,最新成交价,涨跌幅,成交量,成交额"},
-            )
-            if result and "data" in result and result["data"].get("rows"):
-                rows = result["data"]["rows"]
-                if rows:
-                    row = rows[0]
-                    return {
-                        "code": code,
-                        "name": row[0] if row[0] else code,
-                        "latest_price": float(row[1]) if row[1] else None,
-                        "change_pct": float(row[2]) if row[2] else 0,
-                        "volume": int(row[3]) if row[3] else None,
-                        "amount": float(row[4]) if row[4] else 0,
-                        "source": "Wind MCP",
-                    }
+            # 用 K线最近 2 天推算行情: 最后一天 = 今日, 倒数第二天 = prev_close
+            rows = _fetch_wind_fund_kline(wind_code, days=2)
+            if rows and len(rows) >= 1:
+                latest = rows[-1]
+                close = latest["close"]
+                prev_close = rows[-2]["close"] if len(rows) >= 2 else close
+                change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+                return {
+                    "code": code,
+                    "name": next(
+                        (e["name"] for e in CONFIG["etf_list"] if e["code"] == code), code
+                    ),
+                    "latest_price": close,
+                    "change_pct": round(change_pct, 2),
+                    "volume": int(latest["volume"]) if latest["volume"] else None,
+                    "amount": latest["amount"],
+                    "source": "Wind MCP",
+                }
         except Exception as e:
             print(f"Wind MCP 获取 {code} 信息失败: {e}")
 
@@ -286,39 +383,28 @@ def get_etf_kline(code: str, market: str, days: int = 5) -> dict:
     """获取ETF K线数据用于计算资金流 (Wind MCP优先 → akshare → 模拟数据)"""
     if _source_enabled("wind") and WIND_MCP_AVAILABLE:
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days + 10)
             wind_code = f"{code}.{market.upper()}"
-            result = _call_wind_mcp(
-                "fund_data",
-                "get_fund_kline",
-                {
-                    "windcode": wind_code,
-                    "begin_date": start_date.strftime("%Y%m%d"),
-                    "end_date": end_date.strftime("%Y%m%d"),
-                    "count": days,
-                },
-            )
-            if result and "data" in result and result["data"].get("rows"):
-                rows = result["data"]["rows"][-days:]
+            # 取 days+1 条用于计算首日涨跌幅
+            rows = _fetch_wind_fund_kline(wind_code, days=days + 1)
+            if rows and len(rows) >= 1:
                 kline_data = []
-                for row in rows:
-                    date_str = row[0] if isinstance(row[0], str) else str(row[0])
-                    close = float(row[2]) if row[2] else 0
-                    change_pct = float(row[7]) if len(row) > 7 and row[7] else 0
-                    volume = float(row[5]) if row[5] else 0
-                    amount = float(row[6]) if row[6] else 0
+                for i, row in enumerate(rows):
+                    close = row["close"]
+                    prev_close = rows[i - 1]["close"] if i > 0 else close
+                    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+                    amount = row["amount"]
                     kline_data.append(
                         {
-                            "date": date_str,
+                            "date": row["date"],
                             "close": close,
-                            "change_pct": change_pct,
-                            "volume": volume,
+                            "change_pct": round(change_pct, 2),
+                            "volume": row["volume"],
                             "amount": amount,
-                            # 资金流估算：涨跌幅方向 × 成交额
                             "net_flow": amount * (1 if change_pct >= 0 else -1),
                         }
                     )
+                # 只保留最近 days 天
+                kline_data = kline_data[-days:]
                 return {"code": code, "kline": kline_data, "source": "Wind MCP"}
         except Exception as e:
             print(f"Wind MCP 获取 {code} K线失败: {e}")

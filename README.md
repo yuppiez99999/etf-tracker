@@ -121,7 +121,7 @@ CONFIG = {
 
 ## 数据源优先级
 
-1. **Wind MCP** - 优先数据源，启动时自动探测 CLI 可用性（`~/.agents/skills/wind-mcp-skill`）
+1. **Wind MCP** - 优先数据源，HTTP 直连 `mcp.wind.com.cn`（需 `WIND_API_KEY` 环境变量或 `~/.wind-aifinmarket/config`，前复权 qfq）
 2. **akshare** - 备选数据源（新浪 ETF 历史行情，涨跌幅由相邻收盘价计算）
 3. **模拟数据** - 兜底方案，所有数据源不可用时保证报告仍可生成（标记"模拟数据"来源）
 

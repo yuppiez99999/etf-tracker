@@ -16,7 +16,8 @@ target-version = "py310"
 # BLE001: 兜底型数据采集脚本有意宽泛捕获以保降级链不中断
 # DTZ005: A股本地时间场景，naive datetime 为设计选择
 # PLW1510: subprocess 结果由 returncode 分支处理，无需 check
-ignore = ["BLE001", "DTZ005", "PLW1510"]
+# S110: api_key 配置读取失败静默降级
+ignore = ["BLE001", "DTZ005", "PLW1510", "S110"]
 
 [tool.ruff.format]
 quote-style = "double"
