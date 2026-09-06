@@ -726,9 +726,12 @@ def generate_report(window_days: int = 5, top_n: int = 15) -> tuple:
 
 """
 
-    # 显示TOP5净流入和TOP3净流出的可视化
+    # 显示TOP5净流入和TOP3净流出的可视化（净流出按流出最大在前）
     top5 = flow_results[:5]
-    bottom3 = [x for x in flow_results if x["total_net_flow_yi"] < 0][:3]
+    bottom3 = sorted(
+        (x for x in flow_results if x["total_net_flow_yi"] < 0),
+        key=lambda x: x["total_net_flow_yi"],
+    )[:3]
     to_visualize = top5 + bottom3
 
     for item in to_visualize:
@@ -821,7 +824,10 @@ def generate_report(window_days: int = 5, top_n: int = 15) -> tuple:
         print(f"  {item['name']} ({item['code']}): +{item['total_net_flow_yi']}亿, {item['trend']}")
 
     print("\n📉 净流出TOP3:")
-    for item in [x for x in flow_results if x["total_net_flow_yi"] < 0][:3]:
+    for item in sorted(
+        (x for x in flow_results if x["total_net_flow_yi"] < 0),
+        key=lambda x: x["total_net_flow_yi"],
+    )[:3]:
         print(f"  {item['name']} ({item['code']}): {item['total_net_flow_yi']}亿, {item['trend']}")
 
     return report_file, report

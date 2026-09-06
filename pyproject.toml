@@ -20,3 +20,7 @@ ignore = ["BLE001", "DTZ005", "PLW1510"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
