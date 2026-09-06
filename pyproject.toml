@@ -1,0 +1,22 @@
+[project]
+name = "etf-tracker"
+version = "1.1.0"
+description = "ETF 国家队资金监测系统 — 追踪国家队 ETF 资金流向信号"
+requires-python = ">=3.10"
+dependencies = [
+    "akshare>=1.12.0",
+    "pandas>=1.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# BLE001: 兜底型数据采集脚本有意宽泛捕获以保降级链不中断
+# DTZ005: A股本地时间场景，naive datetime 为设计选择
+# PLW1510: subprocess 结果由 returncode 分支处理，无需 check
+ignore = ["BLE001", "DTZ005", "PLW1510"]
+
+[tool.ruff.format]
+quote-style = "double"
